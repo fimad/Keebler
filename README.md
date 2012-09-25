@@ -2,9 +2,9 @@ Keebler
 =======
 
 Keebler is a tool for injecting standalone binary payloads into ELF executables.
-The payload at the end of the segment containing the target's .text section.
+The payload is inserted at the end of the segment containing the target's .text section.
 Execution of the payload is achieved by modifying the .ctors section to point to the first byte of the payload.
-Inorder to not interrupt the normal functioning of the target program, the payload must behave like a function.
+In order to not interrupt the normal functioning of the target program, the payload must behave like a function.
 That means it must return, and it must restore any registers that the target's policy requires (typically base pointer and \*bx).
 
 
