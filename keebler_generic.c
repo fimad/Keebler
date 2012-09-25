@@ -10,7 +10,7 @@
 
 //what kind of elfs are we dealinth with yo?
 //yay polymorphism via macros!
-#define ELFN(x) Elf64_ ## x
+//#define ELFN(x) Elf64_ ## x
 
 char usage[] = 
 "usage: %s target payload result\n\
