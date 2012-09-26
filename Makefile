@@ -8,3 +8,6 @@ keebler32 : keebler32.c keebler_generic.c
 
 keebler64 : keebler64.c keebler_generic.c
 	${CC} -o keebler64 keebler64.c
+
+clean :
+	rm keebler32 keebler64

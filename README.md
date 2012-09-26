@@ -2,8 +2,8 @@ Keebler
 =======
 
 Keebler is a tool for injecting standalone binary payloads into ELF executables.
-The payload is inserted at the end of the segment containing the target's .text section.
-Execution of the payload is achieved by modifying the .ctors section to point to the first byte of the payload.
+The payload is inserted at the end of the segment containing the target's `.text` section.
+Execution of the payload is achieved by modifying the `.ctors` section to point to the first byte of the payload.
 In order to not interrupt the normal functioning of the target program, the payload must behave like a function.
 That means it must return, and it must restore any registers that the target's policy requires (typically base pointer and \*bx).
 
@@ -35,7 +35,7 @@ Bootstrapping Payloads
 Writing standalone assembly is a pain in the ass.
 The `bootstrap.pl` script is meant to alleviate this a bit.
 The script combines an elf file (read: any executable) with a bootstrapping template (there is at least one in `samples`).
-The resulting payload with the encapsulated elf file, will when run unpack the elf and execute it.
+The resulting payload with the encapsulated elf file, will when run, unpack the elf and execute it.
 
 Using `bootstrap.pl` is simple:
 
