@@ -27,6 +27,19 @@ And then extracting just the assembled code with `objcopy`.
 
     as payload.s -o payload.o
     objcopy -O binary payload.o payload
+    
+
+Bootstrapping Payloads
+----------------------
+
+Writing standalone assembly is a pain in the ass.
+The `bootstrap.pl` script is meant to alleviate this a bit.
+The script combines an elf file (read: any executable) with a bootstrapping template (there is at least one in `samples`).
+The resulting payload with the encapsulated elf file, will when run unpack the elf and execute it.
+
+Using `bootstrap.pl` is simple:
+
+    bootstrap.pl -e executable -t bootstrap.s -o payload
 
 
 Infecting
